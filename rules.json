@@ -1,0 +1,42 @@
+{
+	"medical": [
+		{
+			"id": "R1",
+			"premise": "Fever AND Cough",
+			"conclusion": "Flu",
+			"text": "If the patient has Fever and Cough, conclude Flu."
+		},
+		{
+			"id": "R2",
+			"premise": "Fever AND NOT Cough",
+			"conclusion": "ViralInfection",
+			"text": "Fever without cough suggests a generic Viral Infection."
+		},
+		{
+			"id": "R3",
+			"premise": "SoreThroat AND Fever",
+			"conclusion": "Strep",
+			"text": "Sore throat with fever suggests a possible Strep infection."
+		},
+		{
+			"id": "R4",
+			"premise": "Headache AND Nausea",
+			"conclusion": "Migraine",
+			"text": "Headache combined with nausea is indicative of a Migraine."
+		}
+	],
+	"loan": [
+		{
+			"id": "R1",
+			"premise": "IncomeAboveThreshold AND GoodCreditScore",
+			"conclusion": "Eligible",
+			"text": "High income and good credit score -> loan is eligible."
+		},
+		{
+			"id": "R2",
+			"premise": "HasCollateral OR HighIncome",
+			"conclusion": "LowRisk",
+			"text": "Collateral or very high income lowers the risk of default."
+		}
+	]
+}
