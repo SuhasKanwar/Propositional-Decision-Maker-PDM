@@ -1,10 +1,3 @@
-"""Core logic engine for the Propositional Decision Maker (PDM).
-
-This module defines the AST node types, evaluation, truth‑table
-generation utilities, rule representation, and simple forward and
-backward chaining algorithms.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,13 +7,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 import pandas as pd
 
 
-# ---------------------------------------------------------------------------
-# AST node definitions
-
-
 class Formula:
-	"""Base class for all formula AST nodes."""
-
 	def atoms(self) -> Set[str]:
 		raise NotImplementedError
 
@@ -86,16 +73,10 @@ class Iff(Formula):
 		return self.left.atoms() | self.right.atoms()
 
 
-# Public type alias
 FormulaLike = Formula
 
 
 def evaluate(formula: FormulaLike, assignment: Dict[str, bool]) -> bool:
-	"""Evaluate *formula* under the given truth assignment.
-
-	Any atom missing from ``assignment`` is treated as ``False``.
-	"""
-
 	if isinstance(formula, Atom):
 		return bool(assignment.get(formula.name, False))
 	if isinstance(formula, Not):
@@ -123,29 +104,11 @@ def evaluate(formula: FormulaLike, assignment: Dict[str, bool]) -> bool:
 	raise TypeError(f"Unsupported formula type: {type(formula)!r}")
 
 
-# ---------------------------------------------------------------------------
-# Truth‑table generation
-
-
 def generate_truth_table(
 	formulas: Sequence[Tuple[str, FormulaLike]] | None = None,
 	atoms: Optional[Sequence[str]] = None,
 	filter_formula: Optional[Tuple[str, FormulaLike]] = None,
 ) -> pd.DataFrame:
-	"""Generate a full truth table for the given formulas.
-
-	Parameters
-	----------
-	formulas:
-		Sequence of ``(name, formula)`` pairs. May be empty.
-	atoms:
-		Optional explicit ordering of propositional atoms. If omitted, it is
-		inferred from the formulas.
-	filter_formula:
-		Optional ``(name, formula)``. If provided, only rows where this
-		formula evaluates to ``True`` are kept.
-	"""
-
 	formulas = list(formulas or [])
 
 	inferred_atoms: Set[str] = set()
@@ -172,14 +135,8 @@ def generate_truth_table(
 	return pd.DataFrame(rows)
 
 
-# ---------------------------------------------------------------------------
-# Rule representation
-
-
 @dataclass
 class Rule:
-	"""Implication rule ``premise -> conclusion``."""
-
 	id: str
 	premise: FormulaLike
 	conclusion: FormulaLike
@@ -190,13 +147,6 @@ class Rule:
 
 
 def load_rules_from_json(data: Dict[str, List[Dict[str, str]]], domain: str) -> List[Rule]:
-	"""Load rules for a specific *domain* from parsed JSON data.
-
-	The JSON structure is expected to be ``{"medical": [...], "loan": [...]}``.
-	Each rule entry must contain ``id``, ``premise``, ``conclusion`` and
-	``text`` fields containing string formulas.
-	"""
-
 	from parser import parse_formula
 
 	raw_rules = data.get(domain, [])
@@ -214,15 +164,8 @@ def load_rules_from_json(data: Dict[str, List[Dict[str, str]]], domain: str) -> 
 
 
 def rules_to_json_serialisable(rules: Iterable[Rule]) -> Dict[str, List[Dict[str, str]]]:
-	"""Convert a list of rules into a JSON‑serialisable structure.
 
-	The resulting dictionary has a single key ``"rules"`` for simplicity;
-	the Streamlit UI groups them by domain outside of this helper.
-	"""
-
-	from parser import formula_to_str  # type: ignore[attr-defined]
-
-	# ``formula_to_str`` is provided in parser for round‑tripping during edits.
+	from parser import formula_to_str
 	return {
 		"rules": [
 			{
@@ -234,11 +177,6 @@ def rules_to_json_serialisable(rules: Iterable[Rule]) -> Dict[str, List[Dict[str
 			for r in rules
 		]
 	}
-
-
-# ---------------------------------------------------------------------------
-# Forward chaining
-
 
 @dataclass
 class ForwardStep:
@@ -256,20 +194,9 @@ class ForwardResult:
 
 
 def _formula_to_atoms(formula: FormulaLike, assignment: Dict[str, bool]) -> Set[str]:
-	"""Evaluate *formula* under *assignment* and return newly true atoms.
-
-	This helper is used so that conclusions can themselves be composite
-	formulas; any atoms that become ``True`` as a result are added to the
-	fact base.
-	"""
-
-	# Atoms that appear in the conclusion
 	atoms = formula.atoms()
 	newly_true: Set[str] = set()
 	for a in atoms:
-		# Temporarily flip each atom to True and see if formula holds; if so
-		# we consider that atom as inferred. This is a heuristic but works for
-		# simple implication‑style rules used in this project.
 		test_assignment = dict(assignment)
 		test_assignment[a] = True
 		if evaluate(formula, test_assignment):
@@ -278,11 +205,6 @@ def _formula_to_atoms(formula: FormulaLike, assignment: Dict[str, bool]) -> Set[
 
 
 def detect_contradictions(facts: Set[str]) -> List[Tuple[str, str]]:
-	"""Detect simple contradictions of the form *X* and ``NOT X``.
-
-	Facts are encoded as plain atom names or as ``"NOT X"`` strings.
-	"""
-
 	positives: Set[str] = {f for f in facts if not f.startswith("NOT ")}
 	negatives: Set[str] = {f[4:] for f in facts if f.startswith("NOT ")}
 	conflicts = sorted(positives & negatives)
@@ -290,16 +212,6 @@ def detect_contradictions(facts: Set[str]) -> List[Tuple[str, str]]:
 
 
 def forward_chain(initial_facts: Set[str], rules: Sequence[Rule]) -> ForwardResult:
-	"""Run a simple forward‑chaining algorithm.
-
-	Parameters
-	----------
-	initial_facts:
-		Set of atom names assumed to be true.
-	rules:
-		Sequence of ``Rule`` objects.
-	"""
-
 	facts: Set[str] = set(initial_facts)
 	steps: List[ForwardStep] = []
 	step_counter = 1
@@ -335,11 +247,6 @@ def forward_chain(initial_facts: Set[str], rules: Sequence[Rule]) -> ForwardResu
 	contradictions = detect_contradictions(facts)
 	return ForwardResult(final_facts=facts, steps=steps, contradictions=contradictions)
 
-
-# ---------------------------------------------------------------------------
-# Backward chaining
-
-
 @dataclass
 class ProofNode:
 	goal: str
@@ -355,11 +262,6 @@ def backward_chain(
 	rules: Sequence[Rule],
 	visited: Optional[Set[str]] = None,
 ) -> ProofNode:
-	"""Attempt to prove *goal* from *facts* and *rules*.
-
-	The algorithm returns a proof tree regardless of success; the
-	``succeeded`` flag indicates whether the goal was proved.
-	"""
 
 	if visited is None:
 		visited = set()

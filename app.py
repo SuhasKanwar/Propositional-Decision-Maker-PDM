@@ -13,9 +13,10 @@ from logic_core import (
 	Rule,
 	backward_chain,
 	forward_chain,
+	evaluate,
 	generate_truth_table,
 )
-from parser import ParseError, parse_formula
+from parser import ParseError, parse_formula, formula_to_str
 
 
 BASE_DIR = Path(__file__).parent
@@ -45,23 +46,39 @@ def collect_atoms_from_rules(rules: List[Rule]) -> List[str]:
 
 def render_forward_result(result: ForwardResult) -> None:
 	st.subheader("Forward Chaining Result")
-	st.write("Final Facts:")
-	if result.final_facts:
-		st.table(pd.DataFrame(sorted(result.final_facts), columns=["Fact"]))
-	else:
-		st.info("No facts were inferred.")
-
-	st.write("Fired Rules:")
-	if result.steps:
-		for step in result.steps:
-			st.markdown(f"- {step.explanation}")
-	else:
-		st.info("No rules fired for the given facts.")
+	col_a, col_b = st.columns(2)
+	with col_a:
+		st.write("Final Facts")
+		if result.final_facts:
+			st.dataframe(pd.DataFrame(sorted(result.final_facts), columns=["Fact"]))
+		else:
+			st.info("No facts were inferred.")
+	with col_b:
+		st.write("Fired Rules")
+		if result.steps:
+			fired_df = pd.DataFrame(
+				[
+					{
+						"Step": s.step,
+						"Rule": s.rule_id,
+						"Inferred": ", ".join(sorted(s.inferred)),
+						"Explanation": s.explanation,
+					}
+					for s in result.steps
+				]
+			)
+			st.dataframe(fired_df)
+		else:
+			st.info("No rules fired.")
 
 	if result.contradictions:
-		st.error("Contradictions detected:")
-		for atom, msg in result.contradictions:
-			st.markdown(f"- **{atom}**: {msg}")
+		st.error("Contradictions")
+		st.dataframe(
+			pd.DataFrame(
+				[(atom, msg) for atom, msg in result.contradictions],
+				columns=["Atom", "Message"],
+			)
+		)
 
 
 def render_proof_tree(node) -> None:
@@ -78,95 +95,195 @@ def main() -> None:
 	st.set_page_config(page_title="Propositional Decision Maker", layout="wide")
 	st.title("Propositional Decision Maker (PDM)")
 
-	# Sidebar -----------------------------------------------------------------
-	st.sidebar.header("Configuration")
-	rule_sets = load_rule_sets()
-	selected_domain = st.sidebar.selectbox("Demo rule set", ["medical", "loan"])
-	rules = rule_sets[selected_domain]
+	if "custom_rules" not in st.session_state:
+		st.session_state.custom_rules = {"medical": [], "loan": []}
+	if "formula_text" not in st.session_state:
+		st.session_state.formula_text = "Fever AND (Cough OR SoreThroat) -> Flu"
+	if "selected_domain" not in st.session_state:
+		st.session_state.selected_domain = "medical"
 
-	uploaded = st.sidebar.file_uploader("Upload custom rules.json", type="json")
+	st.sidebar.header("Configuration")
+	st.session_state.selected_domain = st.sidebar.selectbox(
+		"Rule set domain", ["medical", "loan"], index=["medical", "loan"].index(st.session_state.selected_domain)
+	)
+
+	rule_sets = load_rule_sets()
+	selected_domain = st.session_state.selected_domain
+	rules_base = rule_sets[selected_domain]
+	rules = rules_base + st.session_state.custom_rules[selected_domain]
+
+	uploaded = st.sidebar.file_uploader("Upload rules.json", type="json")
 	if uploaded is not None:
 		try:
 			data = json.loads(uploaded.read().decode("utf8"))
 			from logic_core import load_rules_from_json
-
-			rules = load_rules_from_json(data, selected_domain)
+			loaded_custom = load_rules_from_json(data, selected_domain)
+			st.session_state.custom_rules[selected_domain] = loaded_custom
+			st.sidebar.success("Custom rules loaded.")
 		except Exception as exc:  # pragma: no cover - UI only
 			st.sidebar.error(f"Failed to load uploaded rules: {exc}")
 
 	atoms = collect_atoms_from_rules(rules)
-	st.sidebar.subheader("Current facts (atoms)")
+	st.sidebar.subheader("Facts")
 	fact_values: Dict[str, bool] = {}
 	for atom in atoms:
 		fact_values[atom] = st.sidebar.checkbox(atom, value=False)
 
-	st.sidebar.subheader("Custom formula")
-	formula_text = st.sidebar.text_input(
-		"Enter a propositional formula", "Fever AND (Cough OR SoreThroat) -> Flu"
-	)
+	if st.sidebar.button("Reset State"):
+		for k in ["custom_rules", "formula_text"]:
+			if k == "custom_rules":
+				st.session_state[k] = {"medical": [], "loan": []}
+			else:
+				st.session_state[k] = "Fever AND (Cough OR SoreThroat) -> Flu"
+		st.rerun()
 
-	st.sidebar.subheader("Actions")
-	generate_tt = st.sidebar.button("Generate Truth Table")
-	run_forward = st.sidebar.button("Run Forward Chain")
-	run_backward = st.sidebar.button("Run Backward Chain (Goal)")
-	reset = st.sidebar.button("Reset")
-
-	if reset:
-		st.experimental_rerun()
-
-	st.sidebar.markdown("---")
 	st.sidebar.info(
-		"Truth table generation is exponential in the number of atoms. "
-		"For more than 16 atoms the app will only evaluate the given assignment."
+		"Generate truth tables, apply forward chaining to infer new facts, or prove a goal using backward chaining."
 	)
 
-	# Main area --------------------------------------------------------------
-	col1, col2 = st.columns(2)
+	tab_tt, tab_forward, tab_backward, tab_rules = st.tabs(
+		["Truth Table", "Forward Chain", "Backward Chain", "Rules"]
+	)
 
-	# Truth table generation -------------------------------------------------
-	if generate_tt:
+	with tab_tt:
+		st.subheader("Truth Table & Formula Evaluation")
+		builder_cols = st.columns([1, 1, 1, 1, 1, 1, 1, 1])
+		buttons = ["NOT", "AND", "OR", "XOR", "->", "<->", "(", ")"]
+		for col, label in zip(builder_cols, buttons):
+			if col.button(label):
+				append = {
+					"NOT": "NOT ",
+					"AND": " AND ",
+					"OR": " OR ",
+					"XOR": " XOR ",
+					"->": " -> ",
+					"<->": " <-> ",
+					"(": "(",
+					")": ")",
+				}[label]
+				st.session_state.formula_text += append
+		if st.button("Clear Formula"):
+			st.session_state.formula_text = ""
+
+		formula_text = st.text_input(
+			"Formula", st.session_state.formula_text, key="formula_input"
+		)
+		st.session_state.formula_text = formula_text
+
 		try:
 			formula = parse_formula(formula_text)
 			all_atoms = sorted(set(atoms) | formula.atoms())
-			if len(all_atoms) > 16:
-				st.warning(
-					"Too many atoms for full truth table; showing evaluation for current facts only."
-				)
-				assignment = {a: fact_values.get(a, False) for a in all_atoms}
-				val = bool(formula and formula_text) and bool(assignment)
-				val = bool(
-					parse_formula(formula_text)
-					and parse_formula(formula_text)
-				)  # placeholder to avoid linter; reevaluate below
-				val = bool(parse_formula(formula_text))  # type: ignore[assignment]
-				val = bool(parse_formula(formula_text))
-				val = bool(parse_formula(formula_text))
-			df = generate_truth_table([("Formula", formula)], atoms=all_atoms)
-			with col1:
-				st.subheader("Truth Table")
+			mode = st.radio(
+				"Evaluation Mode",
+				["Full Table", "Current Assignment"],
+				index=0 if len(all_atoms) <= 16 else 1,
+				help="Full table enumerates all combinations; Current uses selected facts.",
+			)
+			if mode == "Full Table":
+				if len(all_atoms) > 16:
+					st.warning(
+						f"Too many atoms ({len(all_atoms)}) for full table. Showing current assignment only."
+					)
+					mode = "Current Assignment"
+			if mode == "Full Table":
+				df = generate_truth_table([("Formula", formula)], atoms=all_atoms)
+				st.caption(f"Rows: {len(df)} (2^{len(all_atoms)})")
 				st.dataframe(df)
-			with col2:
-				st.subheader("Rows where Formula is True")
 				true_rows = df[df["Formula"]]
+				st.write("True rows")
 				st.dataframe(true_rows)
+			else:
+				assignment = {a: fact_values.get(a, False) for a in all_atoms}
+				val = generate_truth_table([("Formula", formula)], atoms=all_atoms).iloc[0]["Formula"] if len(all_atoms) == 0 else evaluate(formula, assignment)
+				st.write("Current assignment:")
+				st.json(assignment)
+				st.metric("Formula evaluates to", str(val))
+			st.success("Formula parsed successfully.")
 		except ParseError as exc:
 			st.error(f"Parse error: {exc}")
 
-	# Forward chaining -------------------------------------------------------
-	if run_forward:
-		initial_facts = {name for name, val in fact_values.items() if val}
-		result = forward_chain(initial_facts, rules)
-		render_forward_result(result)
+	with tab_forward:
+		st.subheader("Forward Chaining")
+		if st.button("Run Forward Chaining"):
+			initial_facts = {name for name, val in fact_values.items() if val}
+			result = forward_chain(initial_facts, rules)
+			render_forward_result(result)
+		else:
+			st.info("Select facts in the sidebar and click the button to infer new facts.")
 
-	# Backward chaining ------------------------------------------------------
-	if run_backward:
-		goal = st.text_input("Enter goal atom to prove", "Flu")
-		if goal:
+	with tab_backward:
+		st.subheader("Backward Chaining")
+		goal = st.text_input("Goal atom to prove", "Flu", key="goal_atom")
+		if st.button("Run Backward Chaining"):
 			initial_facts = {name for name, val in fact_values.items() if val}
 			proof = backward_chain(goal, initial_facts, rules)
-			st.subheader("Backward Chaining Proof")
+			st.subheader("Proof Tree")
 			render_proof_tree(proof)
+		else:
+			st.info("Enter a goal atom and click the button to attempt a proof.")
+
+	with tab_rules:
+		st.subheader("Rules")
+		if rules:
+			rules_df = pd.DataFrame(
+				[
+					{
+						"ID": r.id,
+						"Premise": formula_to_str(r.premise),
+						"Conclusion": formula_to_str(r.conclusion),
+						"Text": r.description,
+					}
+					for r in rules
+				]
+			)
+			st.dataframe(rules_df, width='stretch')
+		else:
+			st.info("No rules loaded for this domain.")
+
+		st.markdown("### Add New Rule")
+		with st.form("add_rule_form"):
+			new_id = st.text_input("Rule ID", "R_new")
+			premise_text = st.text_input("Premise", "Fever AND Cough")
+			conclusion_text = st.text_input("Conclusion", "Flu")
+			description = st.text_area("Description", "If Fever and Cough then Flu")
+			submitted = st.form_submit_button("Add Rule")
+			if submitted:
+				try:
+					premise_f = parse_formula(premise_text)
+					conclusion_f = parse_formula(conclusion_text)
+					st.session_state.custom_rules[selected_domain].append(
+						Rule(
+							id=new_id,
+							premise=premise_f,
+							conclusion=conclusion_f,
+							description=description,
+						)
+					)
+					st.success(f"Added rule {new_id}.")
+					st.rerun()
+				except ParseError as exc:
+					st.error(f"Failed to parse rule formulas: {exc}")
+
+		if st.button("Download Current Rules as JSON"):
+			serialisable = {
+				"domain": selected_domain,
+				"rules": [
+					{
+						"id": r.id,
+						"premise": formula_to_str(r.premise),
+						"conclusion": formula_to_str(r.conclusion),
+						"text": r.description,
+					}
+					for r in rules
+				],
+			}
+			st.download_button(
+				label="Download JSON",
+				data=json.dumps(serialisable, indent=2),
+				file_name=f"{selected_domain}_rules.json",
+				mime="application/json",
+			)
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
 	main()

@@ -22,6 +22,32 @@ From the project root:
 streamlit run app.py
 ```
 
+### UI Flow (Tabs)
+
+The application uses a tabbed layout for a clearer workflow:
+
+- Truth Table: Build formulas using helper buttons (NOT, AND, OR, XOR, ->, <->) and either generate a full truth table (≤16 atoms) or evaluate against the current fact assignment. Shows rows where the formula is true.
+- Forward Chain: Select facts in the sidebar and infer new facts. Fired rules, inferred facts, and contradictions are displayed in structured tables.
+- Backward Chain: Enter a goal atom and attempt to prove it from current facts and rules. An expandable proof tree shows the reasoning path.
+- Rules: Inspect all loaded rules (base + custom), add new rules via a form, or download the full domain rule set as JSON for reuse.
+
+### Adding Rules at Runtime
+
+Use the Rules tab form:
+1. Fill in ID, premise, conclusion, and description.
+2. Formulas are validated immediately; parse errors are shown inline.
+3. On success, the rule is added to session state and available to chaining.
+
+You can also upload a `rules.json` file (matching the existing schema) via the sidebar to replace the custom rules for the selected domain.
+
+### Exporting Rules
+
+Click "Download Current Rules as JSON" on the Rules tab to export the combined base and custom rules for the active domain.
+
+### Resetting State
+
+Use the sidebar "Reset State" button to clear custom rules and restore the default demo formula.
+
 ## Running Tests
 
 ```bash
@@ -52,6 +78,8 @@ Supported operators (case-insensitive):
 - `<->` – equivalence (iff)
 
 Parentheses can be used freely to override precedence.
+
+The UI helper buttons append tokens to the current formula. Use Clear Formula to start over quickly.
 
 ### Complexity Notes
 

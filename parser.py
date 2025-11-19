@@ -1,22 +1,3 @@
-"""Formula parser for propositional logic.
-
-This module exposes a small recursive‑descent parser that converts
-boolean formulas written in a user friendly syntax into AST nodes
-defined in ``logic_core``.
-
-Supported operators (by decreasing precedence):
-
-* NOT / ~  (unary)
-* AND / &
-* XOR
-* OR / |
-* ->  (IMPLIES)
-* <-> (IFF)
-
-Parentheses can be used to override precedence. Operators are
-case‑insensitive and can be written either as words or symbols.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -48,11 +29,6 @@ def _is_ident_char(ch: str) -> bool:
 
 
 def tokenize(text: str) -> List[Token]:
-	"""Convert a formula string into a list of tokens.
-
-	The tokenizer is intentionally simple and tailored to the grammar we need.
-	"""
-
 	tokens: List[Token] = []
 	i = 0
 	while i < len(text):
@@ -64,7 +40,6 @@ def tokenize(text: str) -> List[Token]:
 			tokens.append(Token(ch, ch))
 			i += 1
 			continue
-		# Multi-character operators first
 		if text.startswith("<->", i):
 			tokens.append(Token("IFF", "<->"))
 			i += 3
@@ -103,13 +78,10 @@ def tokenize(text: str) -> List[Token]:
 
 
 class Parser:
-	"""Recursive‑descent parser for propositional logic formulas."""
-
 	def __init__(self, text: str):
 		self.tokens = tokenize(text)
 		self.pos = 0
 
-	# Utility ---------------------------------------------------------------
 	@property
 	def current(self) -> Token:
 		return self.tokens[self.pos]
@@ -128,17 +100,7 @@ class Parser:
 				f"Expected {kind} but found {self.current.kind} at position {self.pos}."
 			)
 		return tok
-
-	# Grammar with precedence ----------------------------------------------
-	# expr       := iff
-	# iff        := implies ( IFF implies )*
-	# implies    := or_expr ( IMPLIES or_expr )*
-	# or_expr    := xor_expr ( OR xor_expr )*
-	# xor_expr   := and_expr ( XOR and_expr )*
-	# and_expr   := unary ( AND unary )*
-	# unary      := NOT unary | primary
-	# primary    := IDENT | '(' expr ')'
-
+	
 	def parse(self) -> Formula:
 		node = self.parse_iff()
 		if self.current.kind != "EOF":
@@ -203,13 +165,46 @@ class Parser:
 
 
 def parse_formula(text: str) -> Formula:
-	"""Parse *text* into an AST ``Formula``.
-
-	This is the main entry point used by other modules.
-	"""
-
 	parser = Parser(text)
 	return parser.parse()
+
+
+def formula_to_str(node: Formula) -> str:
+	PRECEDENCE = {
+		Atom: 7,
+		Not: 6,
+		And: 5,
+		Xor: 4,
+		Or: 3,
+		Implies: 2,
+		Iff: 1,
+	}
+
+	def _wrap(child: Formula, parent_prec: int) -> str:
+		text = _fmt(child)
+		child_prec = PRECEDENCE[type(child)]
+		if child_prec < parent_prec:
+			return f"({text})"
+		return text
+
+	def _fmt(n: Formula) -> str:
+		if isinstance(n, Atom):
+			return n.name
+		if isinstance(n, Not):
+			return f"NOT {_wrap(n.operand, PRECEDENCE[Not])}"
+		if isinstance(n, And):
+			return f"{_wrap(n.left, PRECEDENCE[And])} AND {_wrap(n.right, PRECEDENCE[And])}"
+		if isinstance(n, Xor):
+			return f"{_wrap(n.left, PRECEDENCE[Xor])} XOR {_wrap(n.right, PRECEDENCE[Xor])}"
+		if isinstance(n, Or):
+			return f"{_wrap(n.left, PRECEDENCE[Or])} OR {_wrap(n.right, PRECEDENCE[Or])}"
+		if isinstance(n, Implies):
+			return f"{_wrap(n.left, PRECEDENCE[Implies])} -> {_wrap(n.right, PRECEDENCE[Implies])}"
+		if isinstance(n, Iff):
+			return f"{_wrap(n.left, PRECEDENCE[Iff])} <-> {_wrap(n.right, PRECEDENCE[Iff])}"
+		raise TypeError(f"Unsupported formula node: {type(n)!r}")
+
+	return _fmt(node)
 
 
 __all__ = [
@@ -218,4 +213,5 @@ __all__ = [
 	"tokenize",
 	"Parser",
 	"parse_formula",
+	"formula_to_str",
 ]
